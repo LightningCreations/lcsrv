@@ -114,7 +114,7 @@ ErrorCode srv_open(Service* srv){
 
 const std::string consumeDir{"/proc/services"};
 
-Service* serv_find(const char* service){
+Service* srv_find(const char* service){
 	if(access((consumeDir+service).c_str(),R_OK|W_OK))
 		return NULL;
 	else{
@@ -125,5 +125,34 @@ Service* serv_find(const char* service){
 		srv->errMsgCache = NULL;
 		return srv;
 	}
+}
+
+void srv_release(Service* srv){
+	if(srv){
+		if(srv->pipefd)
+			srv_close(srv);
+		if(srv->errMsgCache)
+			delete srv->errMsgCache;
+		delete srv;
+	}
+}
+
+enum ErrorCode srv_close(Service* srv){
+	if(!check_open(srv))
+		return ServiceNotOpen;
+	id_t pid = getpid();
+	uint8_t buffer[128]{0xCC,'S','R','V'};
+	uint8_t sz = strlen(srv->serviceName);
+	memcpy(buffer+4,&pid,sizeof(pid));
+	memcpy(buffer+5+sizeof(pid),&sz,1);
+	memcpy(buffer+6+sizeof(pid),srv->serviceName,sz);
+	if(write(srv->exposedFd,buffer,6+sizeof(pid)+sz)==-1){
+		set_error(srv,"Failed to close service, write to source pipe failed");
+		return SystemError;
+	}
+	close(srv->exposedFd);
+	close(srv->pipefd);
+	srv->pipefd = 0;
+	return Ok;
 }
 
